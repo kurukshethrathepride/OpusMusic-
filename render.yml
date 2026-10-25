@@ -3,12 +3,12 @@ services:
     plan: free
     name: opusmusic
     runtime: python
-    repo: https://github.com/kurukshethrathepride/OpusMusic-
+    repo: "https://github.com/kurukshethrathepride/OpusMusic-"
     branch: master
     buildCommand: |
       pip install uv
       uv sync --frozen
-    startCommand: uv run python3 -m opus
+    startCommand: "uv run python3 -m opus"
     envVars:
       - key: API_ID
         sync: false
