@@ -1,5 +1,3 @@
-
-
 services:
   - type: web
     name: opusmusic
@@ -10,31 +8,24 @@ services:
 
     buildCommand: |
       pip install uv
-      uv sync --frozen
+      uv sync
 
     startCommand: uv run python3 -m opus
 
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.0"
-
       - key: API_ID
         sync: false
-
       - key: API_HASH
         sync: false
-
       - key: BOT_TOKEN
         sync: false
-
       - key: OWNER_ID
         sync: false
-
       - key: LOGGER_ID
         sync: false
-
       - key: MONGO_URL
         sync: false
-
       - key: SESSION
         sync: false
