@@ -14,7 +14,7 @@ class Config:
         self.LOGGER_ID = int(getenv("LOGGER_ID", 0))
         self.OWNER_ID = list(map(int, getenv("OWNER_ID", "").split(",")))
 
-        self.DURATION_LIMIT = int(getenv("DURATION_LIMIT", 60)) * 60
+        self.DURATION_LIMIT = int(getenv("DURATION_LIMIT", 640)) * 60
         self.QUEUE_LIMIT = int(getenv("QUEUE_LIMIT", 20))
         self.PLAYLIST_LIMIT = int(getenv("PLAYLIST_LIMIT", 20))
         self.STICKER_ID = getenv("STICKER_ID", "")
@@ -22,8 +22,8 @@ class Config:
         self.SESSION2 = getenv("SESSION2", None)
         self.SESSION3 = getenv("SESSION3", None)
 
-        self.SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/Alfabots_update")
-        self.SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/Alfabots_support")
+        self.SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/HQ_Tracks")
+        self.SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/stenzle_MariaGbot_Support")
 
         self.AUTO_LEAVE: bool = getenv("AUTO_LEAVE", "False").lower() == "true"
         self.AUTO_END: bool = getenv("AUTO_END", "False").lower() == "true"
