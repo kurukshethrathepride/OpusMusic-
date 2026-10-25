@@ -15,9 +15,9 @@ ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 RUN curl -Ls https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
 
-RUN uv sync --frozen
+RUN uv sync
 
 COPY . .
 
