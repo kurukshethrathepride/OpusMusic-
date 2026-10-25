@@ -6,7 +6,7 @@ services:
     runtime: python
     plan: free
     repo: https://github.com/kurukshethrathepride/OpusMusic-
-    branch: master
+    branch: main
 
     buildCommand: |
       pip install uv
