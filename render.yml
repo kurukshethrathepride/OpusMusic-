@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: opusmusic
     runtime: python
     repo: https://github.com/TeamAlfaBots/OpusMusic
