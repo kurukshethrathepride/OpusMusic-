@@ -1,10 +1,4 @@
-services:
-  - type: web
-    plan: free
-    name: opusmusic
-    runtime: python
-    repo: "https://github.com/kurukshethrathepride/OpusMusic-"
-    
+
 services:
   - type: web
     name: opusmusic
@@ -37,4 +31,3 @@ services:
         sync: false
       - key: SESSION
         sync: false
-
