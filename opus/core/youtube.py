@@ -63,6 +63,9 @@ class YouTube:
         # Reuse one keep-alive HTTP session instead of paying connection/TLS
         # setup costs for every track and API attempt.
         self._http_session = None
+        # Avoid duplicate downloads when the same track is requested concurrently.
+        self._download_locks = {}
+        self._prefetch_tasks = set()
 
         # Circuit Breaker — har API ka unique identifier key se banao
         self._fail_count = {self._api_id(api): 0 for api in APIS}
@@ -205,6 +208,8 @@ class YouTube:
             youtube_url = self.base + video_id
             ext = "mp4" if video else "mp3"
             filename = f"{DOWNLOAD_DIR}/{video_id}.{ext}"
+            # Never expose a half-downloaded file to the cache/player.
+            temp_filename = f"{filename}.part"
             os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
             params = {
@@ -226,11 +231,12 @@ class YouTube:
                     return None
 
                 # Keep the larger chunk size to reduce Python/event-loop overhead.
-                with open(filename, "wb") as f:
+                with open(temp_filename, "wb") as f:
                     async for chunk in resp.content.iter_chunked(262144):
                         f.write(chunk)
 
-            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+            if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
+                os.replace(temp_filename, filename)
                 self._mark_success(api)
                 logger.info(f"[{api['url']}] Download success ✓")
                 return filename
@@ -241,6 +247,13 @@ class YouTube:
         except Exception as e:
             logger.warning(f"[{api['url']}] Error: {e}")
             self._mark_fail(api)
+        finally:
+            # A timeout or failed API must not leave a cache-looking partial file.
+            try:
+                if "temp_filename" in locals() and os.path.exists(temp_filename):
+                    os.remove(temp_filename)
+            except OSError:
+                pass
 
         return None
 
@@ -303,11 +316,55 @@ class YouTube:
 
         return await asyncio.to_thread(run)
 
+    def cached_download(self, video_id: str, video: bool = False):
+        """Return a completed local media file, regardless of its real extension."""
+        if not video_id or not os.path.isdir(DOWNLOAD_DIR):
+            return None
+        audio_exts = {".mp3", ".m4a", ".webm", ".opus", ".ogg", ".aac", ".wav", ".flac"}
+        video_exts = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
+        allowed_exts = video_exts if video else audio_exts
+        for name in os.listdir(DOWNLOAD_DIR):
+            ext = os.path.splitext(name)[1].lower()
+            if (name.startswith(f"{video_id}.") and ext in allowed_exts
+                and not name.endswith((".part", ".ytdl", ".tmp"))):
+                path = os.path.join(DOWNLOAD_DIR, name)
+                try:
+                    if os.path.isfile(path) and os.path.getsize(path) > 0:
+                        return path
+                except OSError:
+                    continue
+        return None
+
+    async def prefetch(self, media):
+        """Download a queued track in the background so the next transition is ready."""
+        if not media or media.file_path or self.cached_download(media.id, media.video):
+            if media and not media.file_path:
+                media.file_path = self.cached_download(media.id, media.video)
+            return
+        try:
+            media.file_path = await self.download(media.id, video=media.video)
+            if media.file_path:
+                logger.info(f"Prefetched queued track: {media.id}")
+        except Exception as exc:
+            logger.warning(f"Background prefetch failed for {media.id}: {exc}")
+
     async def download(self, video_id: str, video: bool = False):
-        file = await self.api_download(video_id, video)
+        cached = self.cached_download(video_id, video)
+        if cached:
+            logger.info(f"Using cached media: {video_id}")
+            return cached
 
-        if file:
-            return file
-
-        logger.warning("All APIs failed/blocked, falling back to yt-dlp")
-        return await self.ytdlp_download(video_id, video)
+        # Keep one lock per media variant. Removing an unlocked lock while another
+        # coroutine is waiting on it could allow a second concurrent download.
+        lock_key = f"{video_id}:{int(video)}"
+        lock = self._download_locks.setdefault(lock_key, asyncio.Lock())
+        async with lock:
+            cached = self.cached_download(video_id, video)
+            if cached:
+                return cached
+            file = await self.api_download(video_id, video)
+            if file and os.path.isfile(file) and os.path.getsize(file) > 0:
+                return file
+            logger.warning("All APIs failed/blocked, falling back to yt-dlp")
+            file = await self.ytdlp_download(video_id, video)
+            return file if file and os.path.isfile(file) and os.path.getsize(file) > 0 else None
