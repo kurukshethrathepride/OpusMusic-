@@ -14,27 +14,30 @@ from typing import Union
 from opus import logger
 from opus.helpers import Track, utils
 
+
 # ── Multi-API Config ──────────────────────────────────────────
+# Keep API credentials in Render environment variables.
+# ArtistBots removed because its service is suspended.
 APIS = [
     {
+        "name": "ShrutiBots primary",
         "url": "https://api.shrutibots.site",
-        "key": "ShrutiBots523eCGaP8JkneBnBS8QL",
+        "key": os.getenv("SHRUTIBOTS_API_KEY", "").strip(),
         "param": "api_key",
         "endpoint": "/download",
     },
     {
-        "url": "https://artistbotsapi.onrender.com",
-        "key": "ArtistbotsV5SVPwMJTzKDMYkTvbqBEk",
-        "param": "api_key",
-        "endpoint": "/download",
-    },
-    {
+        "name": "ShrutiBots fallback",
         "url": "https://api.shrutibots.site",
-        "key": "ShrutiBotshMSR3LvyVv3GiNl7Q0bi",
+        "key": os.getenv("SHRUTIBOTS_API_KEY_FALLBACK", "").strip(),
         "param": "api_key",
         "endpoint": "/download",
     },
 ]
+
+# Skip APIs without configured keys.
+APIS = [api for api in APIS if api["key"]]
+
 
 FAIL_THRESHOLD = 3
 BLOCK_DURATION = 5 * 3600  # 5 hours
