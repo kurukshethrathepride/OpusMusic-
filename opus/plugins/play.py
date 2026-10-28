@@ -119,6 +119,11 @@ async def play_hndlr(
                     chat_id=m.chat.id,
                     text=m.lang["playlist_queued"].format(len(tracks)) + added,
                 )
+            # Keep the next queued item warm even when this command only queues it.
+            queued = queue.get_queue(m.chat.id)
+            next_track = queued[1] if len(queued) > 1 else None
+            if next_track and not next_track.file_path:
+                asyncio.create_task(yt.prefetch(next_track))
             return
 
     # The downloader can save MP3, M4A, WebM or MP4. Checking only .webm
@@ -145,3 +150,7 @@ async def play_hndlr(
         chat_id=m.chat.id,
         text=m.lang["playlist_queued"].format(len(tracks)) + added,
     )
+    queued = queue.get_queue(m.chat.id)
+    next_track = queued[1] if len(queued) > 1 else None
+    if next_track and not next_track.file_path:
+        asyncio.create_task(yt.prefetch(next_track))
