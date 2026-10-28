@@ -38,13 +38,37 @@ class Bot(pyrogram.Client):
         self.mention = self.me.mention
 
         try:
+            # LOGGER_ID is the configured log/discussion group or channel ID.
+            log_chat = await self.get_chat(self.logger)
             await self.send_message(self.logger, "Bot Started")
-            get = await self.get_chat_member(self.logger, self.id)
+            member = await self.get_chat_member(self.logger, self.id)
         except Exception as ex:
-            raise SystemExit(f"Bot has failed to access the log group: {self.logger}\nReason: {ex}")
+            raise SystemExit(
+                f"Bot has failed to access LOGGER_ID={self.logger}. "
+                f"Set LOGGER_ID to the numeric ID of your log group/channel and "
+                f"make the bot an administrator there.\nReason: {ex}"
+            )
 
-        if get.status != pyrogram.enums.ChatMemberStatus.ADMINISTRATOR:
-            raise SystemExit("Please promote the bot as an admin in logger group.")
+        if member.status not in (
+            pyrogram.enums.ChatMemberStatus.ADMINISTRATOR,
+            pyrogram.enums.ChatMemberStatus.OWNER,
+        ):
+            raise SystemExit("Please promote the bot as an admin in the LOGGER_ID group/channel.")
+
+        log_title = getattr(log_chat, "title", None) or getattr(log_chat, "first_name", None) or "Untitled"
+        log_username = getattr(log_chat, "username", None)
+        linked_chat_id = getattr(log_chat, "linked_chat_id", None)
+        logger.info(
+            "Logger destination resolved: title=%r id=%s type=%s username=%r "
+            "linked_chat_id=%r",
+            log_title,
+            getattr(log_chat, "id", self.logger),
+            getattr(log_chat, "type", "unknown"),
+            log_username,
+            linked_chat_id,
+        )
+        if log_username:
+            logger.info("Logger destination link: https://t.me/%s", log_username)
         logger.info(f"Bot started as @{self.username}")
 
     async def exit(self):
