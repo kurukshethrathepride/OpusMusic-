@@ -208,6 +208,8 @@ class YouTube:
             youtube_url = self.base + video_id
             ext = "mp4" if video else "mp3"
             filename = f"{DOWNLOAD_DIR}/{video_id}.{ext}"
+            # Never expose a half-downloaded file to the cache/player.
+            temp_filename = f"{filename}.part"
             os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
             params = {
@@ -229,11 +231,12 @@ class YouTube:
                     return None
 
                 # Keep the larger chunk size to reduce Python/event-loop overhead.
-                with open(filename, "wb") as f:
+                with open(temp_filename, "wb") as f:
                     async for chunk in resp.content.iter_chunked(262144):
                         f.write(chunk)
 
-            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+            if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
+                os.replace(temp_filename, filename)
                 self._mark_success(api)
                 logger.info(f"[{api['url']}] Download success ✓")
                 return filename
@@ -244,6 +247,13 @@ class YouTube:
         except Exception as e:
             logger.warning(f"[{api['url']}] Error: {e}")
             self._mark_fail(api)
+        finally:
+            # A timeout or failed API must not leave a cache-looking partial file.
+            try:
+                if "temp_filename" in locals() and os.path.exists(temp_filename):
+                    os.remove(temp_filename)
+            except OSError:
+                pass
 
         return None
 
@@ -310,10 +320,13 @@ class YouTube:
         """Return a completed local media file, regardless of its real extension."""
         if not video_id or not os.path.isdir(DOWNLOAD_DIR):
             return None
+        audio_exts = {".mp3", ".m4a", ".webm", ".opus", ".ogg", ".aac", ".wav", ".flac"}
+        video_exts = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
+        allowed_exts = video_exts if video else audio_exts
         for name in os.listdir(DOWNLOAD_DIR):
-            if name.startswith(f"{video_id}.") and not name.endswith(
-                (".part", ".ytdl", ".tmp")
-            ):
+            ext = os.path.splitext(name)[1].lower()
+            if (name.startswith(f"{video_id}.") and ext in allowed_exts
+                and not name.endswith((".part", ".ytdl", ".tmp"))):
                 path = os.path.join(DOWNLOAD_DIR, name)
                 try:
                     if os.path.isfile(path) and os.path.getsize(path) > 0:
@@ -341,14 +354,20 @@ class YouTube:
             logger.info(f"Using cached media: {video_id}")
             return cached
 
-        lock = self._download_locks.setdefault(video_id, asyncio.Lock())
-        async with lock:
-            cached = self.cached_download(video_id, video)
-            if cached:
-                return cached
-            file = await self.api_download(video_id, video)
-            if file and os.path.isfile(file) and os.path.getsize(file) > 0:
-                return file
-            logger.warning("All APIs failed/blocked, falling back to yt-dlp")
-            file = await self.ytdlp_download(video_id, video)
-            return file if file and os.path.isfile(file) and os.path.getsize(file) > 0 else None
+        lock_key = f"{video_id}:{int(video)}"
+        lock = self._download_locks.setdefault(lock_key, asyncio.Lock())
+        try:
+            async with lock:
+                cached = self.cached_download(video_id, video)
+                if cached:
+                    return cached
+                file = await self.api_download(video_id, video)
+                if file and os.path.isfile(file) and os.path.getsize(file) > 0:
+                    return file
+                logger.warning("All APIs failed/blocked, falling back to yt-dlp")
+                file = await self.ytdlp_download(video_id, video)
+                return file if file and os.path.isfile(file) and os.path.getsize(file) > 0 else None
+        finally:
+            # Drop idle locks to avoid unbounded growth on long-running bots.
+            if not lock.locked() and self._download_locks.get(lock_key) is lock:
+                self._download_locks.pop(lock_key, None)
