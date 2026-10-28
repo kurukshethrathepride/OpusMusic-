@@ -354,20 +354,17 @@ class YouTube:
             logger.info(f"Using cached media: {video_id}")
             return cached
 
+        # Keep one lock per media variant. Removing an unlocked lock while another
+        # coroutine is waiting on it could allow a second concurrent download.
         lock_key = f"{video_id}:{int(video)}"
         lock = self._download_locks.setdefault(lock_key, asyncio.Lock())
-        try:
-            async with lock:
-                cached = self.cached_download(video_id, video)
-                if cached:
-                    return cached
-                file = await self.api_download(video_id, video)
-                if file and os.path.isfile(file) and os.path.getsize(file) > 0:
-                    return file
-                logger.warning("All APIs failed/blocked, falling back to yt-dlp")
-                file = await self.ytdlp_download(video_id, video)
-                return file if file and os.path.isfile(file) and os.path.getsize(file) > 0 else None
-        finally:
-            # Drop idle locks to avoid unbounded growth on long-running bots.
-            if not lock.locked() and self._download_locks.get(lock_key) is lock:
-                self._download_locks.pop(lock_key, None)
+        async with lock:
+            cached = self.cached_download(video_id, video)
+            if cached:
+                return cached
+            file = await self.api_download(video_id, video)
+            if file and os.path.isfile(file) and os.path.getsize(file) > 0:
+                return file
+            logger.warning("All APIs failed/blocked, falling back to yt-dlp")
+            file = await self.ytdlp_download(video_id, video)
+            return file if file and os.path.isfile(file) and os.path.getsize(file) > 0 else None
