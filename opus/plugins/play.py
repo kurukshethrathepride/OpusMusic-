@@ -3,7 +3,7 @@
 # This file is part of OpusMusic
 
 
-from pathlib import Path
+import asyncio
 
 from pyrogram import filters, types
 
@@ -121,13 +121,21 @@ async def play_hndlr(
                 )
             return
 
+    # The downloader can save MP3, M4A, WebM or MP4. Checking only .webm
+    # caused valid cached audio to be ignored and downloaded again on every play.
     if not file.file_path:
-        fname = f"downloads/{file.id}.{'mp4' if video else 'webm'}"
-        if Path(fname).exists():
-            file.file_path = fname
-        else:
-            await sent.edit_text(m.lang["play_downloading"])
-            file.file_path = await yt.download(file.id, video=video)
+        file.file_path = yt.cached_download(file.id, video=video)
+
+    # Fetch the following queued track while this one is playing. This removes
+    # most end-of-track gaps without delaying the current track's startup.
+    queued = queue.get_queue(m.chat.id)
+    next_track = queued[1] if len(queued) > 1 else None
+    if next_track and not next_track.file_path:
+        asyncio.create_task(yt.prefetch(next_track))
+
+    if not file.file_path:
+        await sent.edit_text(m.lang["play_downloading"])
+        file.file_path = await yt.download(file.id, video=video)
 
     await anon.play_media(chat_id=m.chat.id, message=sent, media=file)
     if not tracks:
