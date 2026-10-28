@@ -51,11 +51,9 @@ class TgCall(PyTgCalls):
     ) -> None:
         client = await db.get_assistant(chat_id)
         _lang = await lang.get_lang(chat_id)
-        _thumb = (
-            await thumb.generate(media)
-            if isinstance(media, Track)
-            else config.DEFAULT_THUMB
-        ) if config.THUMB_GEN else None
+        # Do not generate/download artwork before starting the stream: thumbnail
+        # work can involve network and image processing and delays audible playback.
+        _thumb = None
 
         if not media.file_path:
             await message.edit_text(_lang["error_no_file"].format(config.SUPPORT_CHAT))
@@ -80,6 +78,16 @@ class TgCall(PyTgCalls):
                 config=types.GroupCallConfig(auto_start=False),
             )
             if not seek_time:
+                if config.THUMB_GEN:
+                    try:
+                        _thumb = (
+                            await thumb.generate(media)
+                            if isinstance(media, Track)
+                            else config.DEFAULT_THUMB
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Thumbnail generation failed: {exc}")
+                        _thumb = config.DEFAULT_THUMB if isinstance(media, Track) else None
                 media.time = 1
                 await db.add_call(chat_id)
                 text = _lang["play_media"].format(
