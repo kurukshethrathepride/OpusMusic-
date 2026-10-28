@@ -141,6 +141,21 @@ class TgCall(PyTgCalls):
         except RTMPStreamingUnsupported:
             await self.stop(chat_id)
             await message.edit_text(_lang["error_rtmp"])
+        except Exception as exc:
+            # Log unexpected PyTgCalls/FFmpeg errors instead of silently losing
+            # the /play request; send a short message so users know it failed.
+            logger.exception(
+                "Unexpected playback error in chat %s for track %s: %s",
+                chat_id,
+                getattr(media, "id", "unknown"),
+                exc,
+            )
+            try:
+                await message.edit_text(
+                    "Playback failed while starting this track. Please try /play again."
+                )
+            except Exception:
+                pass
 
 
     async def replay(self, chat_id: int) -> None:
