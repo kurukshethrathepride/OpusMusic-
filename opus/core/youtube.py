@@ -60,6 +60,9 @@ class YouTube:
         self.checked = False
         self.cookie_dir = "opus/cookies"
         self._api_index = 0
+        # Reuse one keep-alive HTTP session instead of paying connection/TLS
+        # setup costs for every track and API attempt.
+        self._http_session = None
 
         # Circuit Breaker — har API ka unique identifier key se banao
         self._fail_count = {self._api_id(api): 0 for api in APIS}
@@ -77,6 +80,23 @@ class YouTube:
                         self.cookies.append(f"{self.cookie_dir}/{file}")
             self.checked = True
         return random.choice(self.cookies) if self.cookies else None
+
+    async def _get_http_session(self):
+        if self._http_session is None or self._http_session.closed:
+            connector = aiohttp.TCPConnector(
+                limit=8, limit_per_host=4, ttl_dns_cache=300, keepalive_timeout=30
+            )
+            timeout = aiohttp.ClientTimeout(total=22, connect=4, sock_read=18)
+            self._http_session = aiohttp.ClientSession(
+                connector=connector, timeout=timeout,
+                headers={"User-Agent": "OpusMusic/3.0"},
+            )
+        return self._http_session
+
+    async def close(self):
+        """Release pooled HTTP connections during graceful shutdown."""
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
 
     # ── Circuit Breaker ───────────────────────────────────────
 
@@ -194,23 +214,21 @@ class YouTube:
             if api["key"] and api["param"]:
                 params[api["param"]] = api["key"]
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{api['url']}{api['endpoint']}",
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=60, connect=5),
-                ) as resp:
+            session = await self._get_http_session()
+            async with session.get(
+                f"{api['url']}{api['endpoint']}",
+                params=params,
+            ) as resp:
 
-                    if resp.status != 200:
-                        logger.warning(
-                            f"[{api['url']}] Status: {resp.status}"
-                        )
-                        self._mark_fail(api)
-                        return None
+                if resp.status != 200:
+                    logger.warning(f"[{api['url']}] Status: {resp.status}")
+                    self._mark_fail(api)
+                    return None
 
-                    with open(filename, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(131072):
-                            f.write(chunk)
+                # Keep the larger chunk size to reduce Python/event-loop overhead.
+                with open(filename, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(262144):
+                        f.write(chunk)
 
             if os.path.exists(filename) and os.path.getsize(filename) > 0:
                 self._mark_success(api)
@@ -256,6 +274,12 @@ class YouTube:
             "outtmpl": f"{DOWNLOAD_DIR}/%(id)s.%(ext)s",
             "quiet": True,
             "nocheckcertificate": True,
+            "noplaylist": True,
+            "socket_timeout": 10,
+            "retries": 2,
+            "fragment_retries": 2,
+            "concurrent_fragment_downloads": 4,
+            "cachedir": False,
         }
 
         if cookie:
@@ -264,7 +288,9 @@ class YouTube:
         if video:
             opts["format"] = "bestvideo+bestaudio"
         else:
-            opts["format"] = "bestaudio"
+            # Prefer a higher-bitrate audio-only source, but retain a fallback
+            # for videos that do not expose the preferred format.
+            opts["format"] = "bestaudio[abr>=128]/bestaudio"
 
         def run():
             with yt_dlp.YoutubeDL(opts) as ydl:
